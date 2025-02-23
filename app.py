@@ -7,11 +7,10 @@ def load_and_parse(csv_path):
     df_old = pd.read_csv(csv_path)
     df_old.columns = df_old.columns.str.strip()
 
-    # Проверяем наличие нужных столбцов
-    needed = {"Рецепт", "Ингредиенты", "Инструкция"}
-    missing = needed - set(df_old.columns)
+    needed_cols = {"Рецепт", "Ингредиенты", "Инструкция"}
+    missing = needed_cols - set(df_old.columns)
     if missing:
-        st.error(f"Не найдены столбцы: {missing}")
+        st.error(f"Не найдены обязательные столбцы: {missing}")
         return pd.DataFrame()
 
     new_rows = []
@@ -21,24 +20,26 @@ def load_and_parse(csv_path):
         ingredients_list = str(row["Ингредиенты"]).split("\n")
 
         for ing in ingredients_list:
-            # Ищем количество
+            # 1) Ищем количество
             quantity_match = re.search(r"(\d+\s?(г|гр|мл|шт|kg|л|ст\.л|ч\.л|щепотка))", ing)
             quantity = quantity_match.group(0) if quantity_match else ""
 
-            # Ищем категорию
+            # 2) Ищем категорию
             category_match = re.search(r"\((.*?)\)", ing)
             category = category_match.group(1) if category_match else ""
 
-            # Очищаем название
+            # 3) Очищаем название ингредиента от (категории) и самого количества
             ing_clean = re.sub(r"\(.*?\)", "", ing)  # убираем (…)
-            ing_clean = re.sub(r"(\d+\s?(г|гр|мл|шт|kg|л|ст\.л|ч\.л|щепотка))", "", ing_clean)
-            # Убираем «лишние» пробелы и дефисы в конце
+            ing_clean = re.sub(r"(\d+\s?(г|гр|мл|шт|kg|л|ст\.л|ч\.л|щепотка))", "", ing_clean).strip()
+
+            # Убираем дефис, если он остался одиноко
+            # например, "Яйца — ..." превращаем в "Яйца"
+            ing_clean = re.sub(r"\s?[—-]{1,2}\s?", " ", ing_clean)
             ing_clean = ing_clean.strip()
-            ing_clean = re.sub(r"[-—]+\s*$", "", ing_clean)  # удаляем '-' или '—' в конце
 
             new_rows.append({
                 "Рецепт": recipe,
-                "Ингредиент": ing_clean.strip(),
+                "Ингредиент": ing_clean,
                 "Количество": quantity.strip(),
                 "Категория": category.strip(),
                 "Инструкция": instruction
@@ -63,7 +64,7 @@ def main():
             qty = row["Количество"]
             cat = row["Категория"]
 
-            # Формируем аккуратную строку
+            # Аккуратно склеиваем
             qty_part = f" — {qty}" if qty else ""
             cat_part = f" ({cat})" if cat else ""
 
