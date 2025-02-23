@@ -228,7 +228,7 @@ def main():
         grouped_recipes = cart_df.groupby("Рецепт")["Порции"].sum().reset_index()
         for idx, row_r in grouped_recipes.iterrows():
             rec_name = row_r["Рецепт"]
-            total_portions = row_r["Pорции"]
+            total_portions = row_r["Порции"]
             st.markdown(f"- **{rec_name}** (всего порций: {total_portions})")
             # Кнопка удалить
             if st.button(f"Удалить «{rec_name}»"):
