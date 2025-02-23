@@ -86,7 +86,21 @@ def main():
         st.markdown(f"### {recipe_name}")
         st.markdown("**Ингредиенты:**")
         for _, row in group.iterrows():
-            st.markdown(f"- {row['Ингредиент']} — {row['Количество']} ({row['Категория']})")
+            # Вместо:
+            # st.markdown(f"- {row['Ингредиент']} — {row['Количество']} ({row['Категория']})")
+
+            # Делаем так:
+            ing = row["Ингредиент"]
+            qty = row["Количество"]
+            cat = row["Категория"]
+
+            # Если есть количество — добавляем "— {количество}"
+            qty_part = f" — {qty}" if qty else ""
+
+            # Если есть категория — добавляем "({категория})"
+            cat_part = f" ({cat})" if cat else ""
+
+            st.markdown(f"- {ing}{qty_part}{cat_part}")
         st.markdown(f"**Инструкция:**\n{group.iloc[0]['Инструкция']}")
         st.write("---")
 
