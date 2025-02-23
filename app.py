@@ -183,7 +183,10 @@ def main():
     st.header("Поиск по ингредиенту")
     ing_search = st.text_input("Введите название ингредиента:")
     if ing_search:
-        found = df[df["Ингредиент"].str.contains(ing_search.lower(), case=False, na=False)]
+        found = df[df["Ингредиент"].str.contains(ing_search.lower(), case=False, na=False)
+                | df["Группа"].str.contains(ing_search.lower(), case=False, na=False)
+        ]
+
         if not found.empty:
             st.subheader("Рецепты с этим ингредиентом:")
             for rcp in found["Рецепт"].unique():
