@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 
 # Загрузка структурированных рецептов из CSV
-recipes_df = pd.read_csv('structured_recipes.csv')
+recipes_df = pd.read_csv('updated_recipes_with_cherry.csv')
 
 # Заголовок приложения
 st.title("Кулинарный помощник 🍳")
