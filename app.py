@@ -219,7 +219,7 @@ def main():
         for _, r_row in recipe_counts.iterrows():
             rcp_name = r_row["Рецепт"]
             total_portions = r_row["Count"]
-            st.markdown(f"- **{rcp_name}** (всего порций: {total_portions})")
+            st.markdown(f"- **{rcp_name}** (всего порций: {portions})")
             if st.button(f"Удалить «{rcp_name}»"):
                 remove_recipe_from_cart(rcp_name)
                 st.success(f"«{rcp_name}» удалён!")
