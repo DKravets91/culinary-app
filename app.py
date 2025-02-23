@@ -196,4 +196,42 @@ def main():
     selected = st.multiselect("Выберите рецепты:", recipes_list)
 
     if selected:
+        selected_df = df[df["Рецепт"].isin(selected)]
+        summed_df = sum_ingredients(selected_df)
 
+        st.write("### Итоговый список ингредиентов (по категориям):")
+        cat_grouped = summed_df.groupby("Категория")
+        for cat_name in sorted(cat_grouped.groups.keys()):
+            sub_cat = cat_grouped.get_group(cat_name)
+            st.markdown(f"#### {cat_name if cat_name else 'Без категории'}")
+            for _, row_s in sub_cat.iterrows():
+                ing = row_s["Ингредиент"]
+                num = row_s["Количество_число"]
+                unit = row_s["Единица"]
+                if unit:
+                    st.markdown(f"- **{ing}**: {num} {unit}")
+                else:
+                    st.markdown(f"- **{ing}**: {num}")
+        st.write("---")
+
+    # --- ОТОБРАЖЕНИЕ ВСЕХ РЕЦЕПТОВ (без разбивки по категориям)
+    st.header("Все рецепты")
+    grouped = df.groupby("Рецепт")
+
+    for recipe_name, group in grouped:
+        st.markdown(f"## {recipe_name}")
+        st.markdown("**Ингредиенты:**")
+        for _, row_ing in group.iterrows():
+            ing = row_ing["Ингредиент"]
+            qty = row_ing["Количество"]
+            # Просто выводим
+            qty_part = f" — {qty}" if qty else ""
+            st.markdown(f"- {ing}{qty_part}")
+
+        # Инструкция
+        st.markdown(f"**Инструкция:**\n{group.iloc[0]['Инструкция']}")
+        st.write("---")
+
+
+if __name__ == "__main__":
+    main()
