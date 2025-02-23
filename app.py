@@ -16,7 +16,7 @@ def main():
     recipes_df = load_data("recipes.csv")
 
     # 2. Показываем список столбцов для диагностики
-    st.write("Название столбцов:", list(recipes_df.columns))
+    ## st.write("Название столбцов:", list(recipes_df.columns))
 
     # 3. Проверяем, есть ли нужные столбцы
     required_cols = {"Рецепт", "Ингредиенты", "Инструкция"}
