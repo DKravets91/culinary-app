@@ -18,7 +18,7 @@ AUTO_GROUPS = {
     "сулугуни": "молочные продукты",
     "молоко": "молочные продукты",
     "масло": "молочные продукты",
-    "яйц": "яйца",   # «(категория c1)» => всё равно «яйца»
+    "яйц": "яйца",  # «яйца», «яйцо», «(категория c1)»
     "мука": "мука и злаки",
     "крахмал": "мука и злаки",
     "разрыхлитель": "мука и злаки",
@@ -37,6 +37,8 @@ AUTO_GROUPS = {
 }
 
 ###################################################################
+# Парсинг «100 г» -> (100, "г")
+###################################################################
 def parse_quantity(qty_str: str):
     match = re.match(r"(\d+)\s?(г|гр|мл|шт|kg|л|ст\.л|ч\.л|щепотка)", qty_str.strip(), re.IGNORECASE)
     if match:
@@ -45,12 +47,22 @@ def parse_quantity(qty_str: str):
         return (num, unit)
     return (0.0, "")
 
+###################################################################
+# Унификация названия
+###################################################################
 def unify_ingredient_name(original_name: str) -> str:
+    """
+    Если хотим оставить «(категория c1)» в названии — не вырезаем его,
+    только приводим всё к нижнему регистру и применяем SYNONYMS.
+    """
     name = original_name.strip().lower()
     if name in SYNONYMS:
         name = SYNONYMS[name]
     return name.strip()
 
+###################################################################
+# Автоматическая группа (столбец "Группа")
+###################################################################
 def auto_assign_group(ing_name: str) -> str:
     ing_lower = ing_name.lower()
     for key_sub, group_name in AUTO_GROUPS.items():
@@ -58,6 +70,9 @@ def auto_assign_group(ing_name: str) -> str:
             return group_name
     return ""
 
+###################################################################
+# Парсинг CSV (3 -> 5 колонок): "Рецепт", "Порции", "Ингредиент", "Количество", "Группа", "Инструкция"
+###################################################################
 @st.cache_data
 def load_and_parse(csv_path="recipes.csv"):
     df_old = pd.read_csv(csv_path)
@@ -69,206 +84,169 @@ def load_and_parse(csv_path="recipes.csv"):
         st.error(f"Не найдены столбцы: {missing}")
         return pd.DataFrame()
 
-    parse_rows = []
+    new_rows = []
     for _, row in df_old.iterrows():
-        recipe_name = row["Рецепт"].strip()
-        instruction = row["Инструкция"]
-        lines = str(row["Ингредиенты"]).split("\n")
-        for ing_line in lines:
-            ing_line = ing_line.strip()
-            if not ing_line or "для начинки" in ing_line.lower():
+        recipe_name = str(row["Рецепт"]).strip()
+        instruction = str(row["Инструкция"])
+        ingredients_list = str(row["Ингредиенты"]).split("\n")
+
+        for ing in ingredients_list:
+            ing_low = ing.lower().strip()
+            if not ing_low or "для начинки" in ing_low:
                 continue
 
-            # Ищем кол-во (например, "100 г")
-            qty_match = re.search(r"(\d+.*?(г|гр|мл|шт|kg|л|ст\.л|ч\.л|щепотка))", ing_line, re.IGNORECASE)
-            quantity = qty_match.group(0).strip() if qty_match else ""
+            # Определяем количество
+            qty_match = re.search(r"(\d+\s?(г|гр|мл|шт|kg|л|ст\.л|ч\.л|щепотка))", ing, re.IGNORECASE)
+            quantity = qty_match.group(0) if qty_match else ""
 
-            # Убираем количество (но оставляем "(категория c1)")
-            name_no_qty = re.sub(r"(\d+.*?(г|гр|мл|шт|kg|л|ст\.л|ч\.л|щепотка))", "", ing_line, flags=re.IGNORECASE)
-            # Убираем тире, точки
+            # Не ищем группу в скобках — просто игнорируем (…)
+            # Удаляем только количество из названия, оставляя (категория c1) при желании
+            name_no_qty = re.sub(r"(\d+\s?(г|гр|мл|шт|kg|л|ст\.л|ч\.л|щепотка))", "", ing, flags=re.IGNORECASE)
             name_no_qty = re.sub(r"\s?[—-]{1,2}\s?$", "", name_no_qty)
             name_no_qty = re.sub(r"\s?\.\s?$", "", name_no_qty)
             name_no_qty = name_no_qty.strip()
 
             ing_clean = unify_ingredient_name(name_no_qty)
+
+            # Автоприсвоение группы
             group_str = auto_assign_group(ing_clean)
 
-            parse_rows.append({
+            new_rows.append({
                 "Рецепт": recipe_name,
-                "Ингредиент": name_no_qty,   # оригинал (включая "(категория c1)")
+                "Ингредиент": name_no_qty.strip(),  # оригинал (включая (категория c1) если было)
                 "Количество": quantity.strip(),
                 "Группа": group_str.strip(),
                 "Инструкция": instruction
             })
 
-    if not parse_rows:
-        return pd.DataFrame()
+    return pd.DataFrame(new_rows)
 
-    df_parsed = pd.DataFrame(parse_rows)
-
-    # Сольём строки одного рецепта в один JSON
-    final = []
-    for recipe_name, grp in df_parsed.groupby("Рецепт"):
-        instruct = grp["Инструкция"].iloc[0]
-        # Собираем список словарей {Ингредиент, Количество, Группа}
-        ing_list = grp[["Ингредиент","Количество","Группа"]].to_dict(orient="records")
-        final.append({
-            "Рецепт": recipe_name,
-            "ИнгредиентыJSON": ing_list,
-            "Инструкция": instruct
-        })
-    return pd.DataFrame(final)
-
-def sum_ingredients(cart_df: pd.DataFrame):
+###################################################################
+# Суммируем ингредиенты (с учётом порций, т.е. дублирование)
+###################################################################
+def sum_ingredients(selected_df: pd.DataFrame):
     rows = []
-    for _, c_row in cart_df.iterrows():
-        rcp_name = c_row["Рецепт"]
-        pors = c_row["Порции"]
-        ing_list = c_row["ИнгредиентыJSON"]
-        if not isinstance(ing_list, list):
-            continue
-        for ing_item in ing_list:
-            ingname = ing_item["Ингредиент"]
-            grp = ing_item["Группа"]
-            qty_str = ing_item["Количество"]
-            base, unit = parse_quantity(qty_str)
-            total = base * pors
-            rows.append({
-                "Рецепт": rcp_name,
-                "Ингредиент": ingname,
-                "Группа": grp,
-                "Количество_число": total,
-                "Единица": unit
-            })
-    if not rows:
-        return pd.DataFrame()
-    out_df = pd.DataFrame(rows)
-    # Суммируем одинаковые ингредиенты
-    out_df = out_df.groupby(["Ингредиент","Группа","Единица"], as_index=False)["Количество_число"].sum()
-    return out_df
+    for _, row in selected_df.iterrows():
+        orig_name = row["Ингредиент"]
+        grp = row["Группа"]
+        qty_str = row["Количество"]
+        num, unit = parse_quantity(qty_str)
+        rows.append({
+            "Ингредиент": orig_name,
+            "Группа": grp,
+            "Количество_число": num,
+            "Единица": unit
+        })
+    tmp_df = pd.DataFrame(rows)
+    grouped = tmp_df.groupby(["Ингредиент", "Группа", "Единица"], as_index=False)["Количество_число"].sum()
+    return grouped
 
+###################################################################
+# Добавление рецепта + порции
+###################################################################
 def add_recipe_to_cart(recipe_name, portions, df_parsed):
     if "cart" not in st.session_state:
-        # столбцы = Рецепт, Порции, ИнгредиентыJSON, Инструкция
-        st.session_state["cart"] = pd.DataFrame(columns=["Рецепт","Порции","ИнгредиентыJSON","Инструкция"])
+        st.session_state["cart"] = pd.DataFrame(columns=["Рецепт","Порции","Ингредиент","Количество","Группа","Инструкция"])
 
-    found_row = df_parsed[df_parsed["Рецепт"] == recipe_name]
-    if found_row.empty:
-        st.error("Рецепт не найден!")
+    selected_rows = df_parsed[df_parsed["Рецепт"] == recipe_name]
+    if selected_rows.empty:
         return
-    row = found_row.iloc[0]
 
-    cart = st.session_state["cart"]
-    exist_idx = cart[cart["Рецепт"] == recipe_name].index
-    if len(exist_idx) > 0:
-        # уже есть -> увеличиваем
-        idx = exist_idx[0]
-        old_p = cart.loc[idx, "Порции"]
-        new_p = old_p + portions
-        st.session_state["cart"].loc[idx, "Порции"] = new_p
-        st.success(f"У «{recipe_name}» теперь {new_p} порций!")
-    else:
-        # добавляем
-        new_row = pd.DataFrame([{
-            "Рецепт": row["Рецепт"],
-            "Порции": portions,
-            "ИнгредиентыJSON": row["ИнгредиентыJSON"],
-            "Инструкция": row["Инструкция"]
-        }])
-        st.session_state["cart"] = pd.concat([st.session_state["cart"], new_row], ignore_index=True)
-        st.success(f"Добавлен рецепт «{recipe_name}» x {portions} порций!")
+    # Дублируем каждую строку «portions» раз
+    extended = pd.concat([selected_rows]*portions, ignore_index=True)
+    extended["Порции"] = 1  # У каждой строки порция=1
+    st.session_state["cart"] = pd.concat([st.session_state["cart"], extended], ignore_index=True)
 
+###################################################################
+# Удаление
+###################################################################
 def remove_recipe_from_cart(recipe_name):
     if "cart" not in st.session_state:
         return
     st.session_state["cart"] = st.session_state["cart"][st.session_state["cart"]["Рецепт"] != recipe_name]
 
+###################################################################
 def main():
     st.title("Кулинарный помощник 🍳")
 
     df = load_and_parse("recipes.csv")
     if df.empty:
-        st.write("Нет рецептов!")
         return
 
-    #=== Поиск по ингредиенту
+    #--- Поиск по ингредиенту
     st.header("Поиск по ингредиенту")
     ing_search = st.text_input("Введите название ингредиента:")
     if ing_search:
-        found_recs = []
-        for _, rowx in df.iterrows():
-            ing_list = rowx["ИнгредиентыJSON"]
-            for item in ing_list:
-                if ing_search.lower() in item["Ингредиент"].lower():
-                    found_recs.append(rowx["Рецепт"])
-                    break
-        if found_recs:
-            st.subheader("Рецепты, где есть этот ингредиент:")
-            for recp in found_recs:
-                st.markdown(f"- **{recp}**")
+        found = df[df["Ингредиент"].str.contains(ing_search.lower(), case=False, na=False)]
+        if not found.empty:
+            st.subheader("Рецепты с этим ингредиентом:")
+            for rcp in found["Рецепт"].unique():
+                st.markdown(f"- **{rcp}**")
         else:
-            st.write("Не найдено.")
+            st.write("Не найдено рецептов с таким ингредиентом.")
         st.write("---")
 
-    #=== Добавление рецептов
-    st.header("Добавить рецепты (с учётом порций)")
-    recipe_list = df["Рецепт"].unique().tolist()
-    recipe_choice = st.selectbox("Выберите рецепт:", [""]+list(recipe_list))
+    #--- Добавление рецептов
+    st.header("Добавить рецепты в список (с учётом порций)")
+    rec_list = df["Рецепт"].unique().tolist()
+    recipe_choice = st.selectbox("Выберите рецепт:", [""] + rec_list)
     portions = st.number_input("Количество порций:", min_value=1, max_value=50, value=1)
 
     if st.button("Добавить в список"):
         if recipe_choice:
             add_recipe_to_cart(recipe_choice, portions, df)
+            st.success(f"Добавлен рецепт: {recipe_choice} x {portions} порций!")
 
-    #=== Список выбранных
+    #--- Отображение выбранных рецептов
     st.header("Выбранные рецепты (список)")
     if "cart" not in st.session_state or st.session_state["cart"].empty:
         st.write("Пока нет добавленных рецептов.")
     else:
         cart_df = st.session_state["cart"]
-        for idx, crow in cart_df.iterrows():
-            rname = crow["Рецепт"]
-            pors = crow["Порции"]
-            st.markdown(f"- **{rname}** (порций: {pors})")
-            if st.button(f"Удалить «{rname}»"):
-                remove_recipe_from_cart(rname)
-                st.success(f"«{rname}» удалён!")
+        # Для каждого рецепта подсчитаем, сколько раз (строк) он добавлен
+        # т.к. каждая строка = 1 «порция»
+        recipe_counts = cart_df.groupby("Рецепт").size().reset_index(name="Count")
+
+        for _, r_row in recipe_counts.iterrows():
+            rcp_name = r_row["Рецепт"]
+            total_portions = r_row["Count"]
+            st.markdown(f"- **{rcp_name}** (всего порций: {total_portions})")
+            if st.button(f"Удалить «{rcp_name}»"):
+                remove_recipe_from_cart(rcp_name)
+                st.success(f"«{rcp_name}» удалён!")
                 return
 
         st.write("---")
 
-        # Итоговый список ингредиентов
+        # Итоговый список ингредиентов (по группам)
         st.write("### Итоговый список ингредиентов (по группам)")
-        result_df = sum_ingredients(cart_df)
-        if not result_df.empty:
-            grouped = result_df.groupby("Группа")
-            for grp_name in sorted(grouped.groups.keys()):
-                sub_df = grouped.get_group(grp_name)
-                st.markdown(f"#### {grp_name if grp_name else 'Без группы'}")
-                for _, r2 in sub_df.iterrows():
-                    iname = r2["Ингредиент"]
-                    num = r2["Количество_число"]
-                    unit = r2["Единица"]
-                    line = f"- **{iname}**: {num} {unit}" if unit else f"- **{iname}**: {num}"
-                    st.markdown(line)
-        else:
-            st.write("Нет ингредиентов.")
+        final_df = sum_ingredients(cart_df)
+        grp_grouped = final_df.groupby("Группа")
+        for grp_name in sorted(grp_grouped.groups.keys()):
+            sub_cat = grp_grouped.get_group(grp_name)
+            st.markdown(f"#### {grp_name if grp_name else 'Без группы'}")
+            for _, row_s in sub_cat.iterrows():
+                ing = row_s["Ингредиент"]
+                num = row_s["Количество_число"]
+                unit = row_s["Единица"]
+                if unit:
+                    st.markdown(f"- **{ing}**: {num} {unit}")
+                else:
+                    st.markdown(f"- **{ing}**: {num}")
         st.write("---")
 
-    #=== Все рецепты (оригинал)
+    #--- Все рецепты
     st.header("Все рецепты (оригинал)")
-
-    for _, rowy in df.iterrows():
-        rname = rowy["Рецепт"]
+    grouped_df = df.groupby("Рецепт")
+    for rname, group in grouped_df:
         st.markdown(f"## {rname}")
         st.markdown("**Ингредиенты:**")
-        ing_list = rowy["ИнгредиентыJSON"]
-        for item in ing_list:
-            nm = item["Ингредиент"]
-            qty = item["Количество"]
+        for _, r_ing in group.iterrows():
+            ing = r_ing["Ингредиент"]
+            qty = r_ing["Количество"]
             qpart = f" — {qty}" if qty else ""
-            st.markdown(f"- {nm}{qpart}")
-        st.markdown(f"**Инструкция:**\n{rowy['Инструкция']}")
+            st.markdown(f"- {ing}{qpart}")
+        st.markdown(f"**Инструкция:**\n{group.iloc[0]['Инструкция']}")
         st.write("---")
 
 
