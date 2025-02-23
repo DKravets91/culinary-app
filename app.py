@@ -212,7 +212,7 @@ def main():
         recipe_groups = cart_df.groupby("Рецепт")["Порции"].sum().reset_index()
         for _, r_row in recipe_groups.iterrows():
             rcp_name = r_row["Рецепт"]
-            sum_portions = r_row["Pорции"]  # check the column name carefully
+            sum_portions = r_row["Порции"]  # check the column name carefully
             st.markdown(f"- **{rcp_name}** (всего порций: {sum_portions})")
             # Кнопка удаления
             if st.button(f"Удалить «{rcp_name}»"):
