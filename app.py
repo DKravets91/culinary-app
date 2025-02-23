@@ -71,7 +71,7 @@ def auto_assign_group(ing_name: str) -> str:
     return ""
 
 ###################################################################
-# Парсинг CSV (3 -> 5 колонок) : "Рецепт", "Порции", "Ингредиент", "Количество", "Группа", "Инструкция"
+# Парсинг CSV (3 -> 5 колонок): "Рецепт", "Порции", "Ингредиент", "Количество", "Группа", "Инструкция"
 ###################################################################
 @st.cache_data
 def load_and_parse(csv_path="recipes.csv"):
@@ -99,11 +99,8 @@ def load_and_parse(csv_path="recipes.csv"):
             qty_match = re.search(r"(\d+\s?(г|гр|мл|шт|kg|л|ст\.л|ч\.л|щепотка))", ing, re.IGNORECASE)
             quantity = qty_match.group(0) if qty_match else ""
 
-            # Пробуем вытащить группу из скобок, если там написано (молочные продукты) и т.п.
-            group_match = re.search(r"\((.*?)\)", ing)
-            group_str = group_match.group(1) if group_match else ""
-
-            # Убираем количество из названия, оставляя (категория c1), если есть
+            # Не ищем группу в скобках — просто игнорируем (…)
+            # Удаляем только количество из названия, оставляя (категория c1) при желании
             name_no_qty = re.sub(r"(\d+\s?(г|гр|мл|шт|kg|л|ст\.л|ч\.л|щепотка))", "", ing, flags=re.IGNORECASE)
             name_no_qty = re.sub(r"\s?[—-]{1,2}\s?$", "", name_no_qty)
             name_no_qty = re.sub(r"\s?\.\s?$", "", name_no_qty)
@@ -111,17 +108,12 @@ def load_and_parse(csv_path="recipes.csv"):
 
             ing_clean = unify_ingredient_name(name_no_qty)
 
-            # Если group_str пусто — автоназначаем
-            # Иначе, если group_str содержит «категория c1», то force -> "яйца"
-            group_str = group_str.lower()
-            if re.search(r"категория\s*c\d", group_str):
-                group_str = "яйца"
-            if not group_str:
-                group_str = auto_assign_group(ing_clean)
+            # Автоприсвоение группы
+            group_str = auto_assign_group(ing_clean)
 
             new_rows.append({
                 "Рецепт": recipe_name,
-                "Ингредиент": name_no_qty.strip(),  # оригинал, включая (категория c1)
+                "Ингредиент": name_no_qty.strip(),  # оригинал (включая (категория c1) если было)
                 "Количество": quantity.strip(),
                 "Группа": group_str.strip(),
                 "Инструкция": instruction
@@ -156,14 +148,13 @@ def add_recipe_to_cart(recipe_name, portions, df_parsed):
     if "cart" not in st.session_state:
         st.session_state["cart"] = pd.DataFrame(columns=["Рецепт","Порции","Ингредиент","Количество","Группа","Инструкция"])
 
-    # Выбираем строки этого рецепта
     selected_rows = df_parsed[df_parsed["Рецепт"] == recipe_name]
     if selected_rows.empty:
         return
 
-    # Дублируем кажую строку «portions» раз
+    # Дублируем каждую строку «portions» раз
     extended = pd.concat([selected_rows]*portions, ignore_index=True)
-    extended["Порции"] = 1  # У каждой строки порция=1, но строка дублируется
+    extended["Порции"] = 1  # У каждой строки порция=1
     st.session_state["cart"] = pd.concat([st.session_state["cart"], extended], ignore_index=True)
 
 ###################################################################
@@ -213,7 +204,7 @@ def main():
     else:
         cart_df = st.session_state["cart"]
         # Для каждого рецепта подсчитаем, сколько раз (строк) он добавлен
-        # т.к. каждая строка = 1 порция
+        # т.к. каждая строка = 1 «порция»
         recipe_counts = cart_df.groupby("Рецепт").size().reset_index(name="Count")
 
         for _, r_row in recipe_counts.iterrows():
