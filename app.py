@@ -27,7 +27,10 @@ if ingredient:
 st.header("📋 Все рецепты")
 for _, row in recipes_df.iterrows():
     st.markdown(f"### {row['Название']}")
-    # Разделение ингредиентов на строки
-    ingredients = row['Ингредиенты'].replace(') ', ')\n')
-    st.markdown(f"**Ингредиенты:**\n{ingredients}")
+    # Разделяем ингредиенты построчно
+    ingredients = row['Ингредиенты'].split(') ')
+    formatted_ingredients = "\n".join(f"- {item})" for item in ingredients if item)
+    st.markdown(f"**Ингредиенты:**\n{formatted_ingredients}")
     st.write(f"**Инструкция:**\n{row['Инструкция']}")
+
+
