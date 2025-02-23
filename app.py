@@ -1,45 +1,60 @@
 import streamlit as st
 import pandas as pd
 
-# Загрузка данных из файла recipes.csv
-recipes_df = pd.read_csv('recipes.csv')
+@st.cache_data
+def load_data(csv_path: str):
+    """Загружаем CSV и возвращаем DataFrame."""
+    df = pd.read_csv(csv_path)
+    # Убираем случайные пробелы в названиях столбцов
+    df.columns = df.columns.str.strip()
+    return df
 
-# Убираем лишние пробелы из названий столбцов
-recipes_df.columns = recipes_df.columns.str.strip()
+def main():
+    st.title("Кулинарный помощник 🍳")
 
-# Проверка названий столбцов
-st.write("Названия столбцов в файле:", list(recipes_df.columns))
+    # 1. Загружаем данные из файла recipes.csv
+    recipes_df = load_data("recipes.csv")
 
-# Заголовок приложения
-st.title("Кулинарный помощник 🍳")
+    # 2. Показываем список столбцов для диагностики
+    st.write("Название столбцов:", list(recipes_df.columns))
 
-# Поиск по ингредиенту
-st.header("🔍 Поиск рецептов по ингредиенту")
-ingredient = st.text_input("Введите ингредиент для поиска:")
+    # 3. Проверяем, есть ли нужные столбцы
+    required_cols = {"Рецепт", "Ингредиенты", "Инструкция"}
+    missing = required_cols - set(recipes_df.columns)
+    if missing:
+        st.error(f"Не найдены обязательные столбцы: {missing}")
+        return
 
-if ingredient:
-    filtered_recipes = recipes_df[recipes_df['Ингредиент'].str.contains(ingredient, case=False, na=False)]
-    if not filtered_recipes.empty:
-        st.subheader("🍽️ Найденные рецепты:")
-        for _, row in filtered_recipes.iterrows():
-            st.markdown(f"## {row['Рецепт']}")  # Заменили 'Название' на 'Рецепт'
-            st.markdown(f"- {row['Ингредиент']} — {row['Количество']} ({row['Категория']})")
-            st.write(f"**Инструкция:**\n{row['Инструкция']}")
-    else:
-        st.write("😔 Рецепты с этим ингредиентом не найдены.")
+    # 4. Поиск по ингредиенту
+    st.header("🔍 Поиск рецептов по ингредиенту")
+    ingredient_search = st.text_input("Введите ингредиент для поиска:")
+    if ingredient_search:
+        # Фильтруем по столбцу "Ингредиенты"
+        filtered = recipes_df[recipes_df["Ингредиенты"].str.contains(ingredient_search, case=False, na=False)]
+        if not filtered.empty:
+            st.subheader("🍽️ Найденные рецепты:")
+            # Группируем по названию рецепта
+            grouped = filtered.groupby("Рецепт")
+            for recipe_name, group in grouped:
+                st.markdown(f"## {recipe_name}")
+                st.markdown("**Ингредиенты:**")
+                for _, row in group.iterrows():
+                    st.markdown(f"- {row['Ингредиенты']}")
+                st.markdown(f"**Инструкция:**\n{group.iloc[0]['Инструкция']}")
+        else:
+            st.write("😔 Рецепты с этим ингредиентом не найдены.")
 
-# Отображение всех рецептов
-st.header("📋 Все рецепты")
-
-# Вывод всех названий рецептов
-if "Рецепт" in recipes_df.columns:
-    grouped = recipes_df.groupby("Рецепт")  # Группируем по 'Рецепт'
-    for recipe_name, group in grouped:
+    # 5. Отображение всех рецептов
+    st.header("📋 Все рецепты")
+    all_grouped = recipes_df.groupby("Рецепт")
+    for recipe_name, group in all_grouped:
         st.markdown(f"### {recipe_name}")
         st.markdown("**Ингредиенты:**")
         for _, row in group.iterrows():
-            st.markdown(f"- {row['Ингредиент']} — {row['Количество']} ({row['Категория']})")
-        instruction = group["Инструкция"].iloc[0]
-        st.markdown(f"**Инструкция:**\n{instruction}")
-else:
-    st.write("❌ Столбец 'Рецепт' не найден в данных. Пожалуйста, проверьте структуру файла recipes.csv.")
+            st.markdown(f"- {row['Ингредиенты']}")
+        st.markdown(f"**Инструкция:**\n{group.iloc[0]['Инструкция']}")
+        st.write("---")
+
+
+if __name__ == "__main__":
+    main()
